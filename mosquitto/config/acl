@@ -1,0 +1,10 @@
+# The ingest worker reads all device telemetry.
+user ingest
+topic read aqua/devices/+/telemetry
+
+# Development simulator only. Publishes as any device.
+user simulator
+topic write aqua/devices/+/telemetry
+
+# A real device logs in with its serial and can publish only to its own topic.
+pattern write aqua/devices/%u/telemetry
