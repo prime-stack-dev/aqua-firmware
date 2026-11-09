@@ -1,0 +1,135 @@
+# Production Docker Compose Stack for AWS EC2 Graviton (ARM64)
+# Aqua OS Platform: FastAPI, TimescaleDB, Redis, Mosquitto MQTT, Ingest & Jobs
+
+x-backend: &backend
+  build:
+    context: ../backend
+    dockerfile: Dockerfile
+  env_file:
+    - .env.production
+  restart: always
+  networks:
+    - aqua_network
+
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.18
+    container_name: aqua_mosquitto
+    command: >
+      sh -c "touch /tmp/passwd &&
+      mosquitto_passwd -b /tmp/passwd ingest \"$$MQTT_PASSWORD\" &&
+      mosquitto_passwd -b /tmp/passwd simulator \"$$MQTT_SIMULATOR_PASSWORD\" &&
+      chown mosquitto:mosquitto /tmp/passwd && chmod 0600 /tmp/passwd &&
+      exec mosquitto -c /mosquitto/config/mosquitto.conf"
+    env_file:
+      - .env.production
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -u ingest -P \"$$MQTT_PASSWORD\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: always
+    networks:
+      - aqua_network
+
+  postgres-db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: aqua_postgres
+    env_file:
+      - .env.production
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aqua}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aquadb}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: always
+    networks:
+      - aqua_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: aqua_redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    restart: always
+    networks:
+      - aqua_network
+
+  backend:
+    <<: *backend
+    container_name: aqua_backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  ingest:
+    <<: *backend
+    container_name: aqua_ingest
+    command: python -m app.mqtt.worker
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres-db:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_healthy
+
+  jobs:
+    <<: *backend
+    container_name: aqua_jobs
+    command: python -m app.jobs.worker
+    depends_on:
+      backend:
+        condition: service_healthy
+      postgres-db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+    driver: local
+  mosquitto-data:
+    driver: local
+  mosquitto-log:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  aqua_network:
+    driver: bridge
