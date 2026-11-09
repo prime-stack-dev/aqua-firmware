@@ -1,4 +1,5 @@
 import uuid
+from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -96,3 +97,26 @@ class TenantAlertRuleRepository(TenantRepository[AlertRule]):
 
     async def metric_exists(self, key: str) -> bool:
         return await self.session.get(MetricDefinition, key) is not None
+
+
+class AlertRuleRepository(BaseRepository[AlertRule]):
+    """System-level rule access for workers."""
+
+    model = AlertRule
+
+    async def list_all_by_org(self) -> dict[uuid.UUID | None, list[AlertRule]]:
+        rules: dict[uuid.UUID | None, list[AlertRule]] = defaultdict(list)
+        for rule in await self.session.scalars(select(AlertRule)):
+            rules[rule.org_id].append(rule)
+        return dict(rules)
+
+
+class MetricDefinitionRepository(BaseRepository[MetricDefinition]):
+    """Access to system-wide sensor metric definitions and validation limits."""
+
+    model = MetricDefinition
+
+    async def list_limits(self) -> dict[str, tuple[float | None, float | None]]:
+        stmt = select(MetricDefinition.key, MetricDefinition.min_valid, MetricDefinition.max_valid)
+        metrics = await self.session.execute(stmt)
+        return {key: (low, high) for key, low, high in metrics}

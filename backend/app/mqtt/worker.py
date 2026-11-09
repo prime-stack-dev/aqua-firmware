@@ -34,8 +34,12 @@ async def main() -> None:
         asyncio.create_task(service.run(), name="flush"),
     ]
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: [task.cancel() for task in tasks])
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: [task.cancel() for task in tasks])
+    except NotImplementedError:
+        # Windows does not support loop.add_signal_handler for all signals
+        pass
 
     try:
         await asyncio.gather(*tasks)

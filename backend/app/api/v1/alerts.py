@@ -102,5 +102,5 @@ async def delete_rule(rule_id: uuid.UUID, rules: Rules, session: SessionDep) -> 
     rule = await rules.get(rule_id)
     if rule is None:
         raise not_found("Alert rule")
-    await session.delete(rule)
+    await rules.delete(rule)
     await session.commit()

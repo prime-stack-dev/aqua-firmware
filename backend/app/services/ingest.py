@@ -2,18 +2,19 @@
 import asyncio
 import logging
 import time
-from collections import Counter, defaultdict, deque
+from collections import Counter, deque
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.models import METRIC_COLUMNS, AlertRule, Device, MetricDefinition, Pond
-from app.repositories.settings import load_settings
+from app.models import METRIC_COLUMNS
+from app.repositories.alert import AlertRuleRepository, MetricDefinitionRepository
+from app.repositories.device import DeviceLookupRepository
+from app.repositories.settings import SettingsRepository
 from app.repositories.telemetry import TelemetryRepository
 from app.schemas.telemetry import TelemetryPayload
 from app.services.alerts import AlertService
@@ -95,27 +96,20 @@ def parse_reading(
 
 
 async def load_reference(session: AsyncSession) -> ReferenceData:
-    reference = ReferenceData()
-
-    devices = await session.execute(
-        select(Device.serial, Device.id, Device.org_id, Device.pond_id, Pond.farm_id)
-        .outerjoin(Pond, Pond.id == Device.pond_id)
-        .where(Device.org_id.is_not(None), Device.is_active)
+    active_devices = await DeviceLookupRepository(session).list_active_devices()
+    devices = {
+        serial: DeviceRef(device_id, org_id, pond_id, farm_id)
+        for serial, device_id, org_id, pond_id, farm_id in active_devices
+    }
+    rules = await AlertRuleRepository(session).list_all_by_org()
+    limits = await MetricDefinitionRepository(session).list_limits()
+    settings = await SettingsRepository(session).load_settings()
+    return ReferenceData(
+        devices=devices,
+        rules_by_org=rules,
+        metric_limits=limits,
+        settings=settings,
     )
-    for serial, device_id, org_id, pond_id, farm_id in devices:
-        reference.devices[serial] = DeviceRef(device_id, org_id, pond_id, farm_id)
-
-    rules: dict = defaultdict(list)
-    for rule in await session.scalars(select(AlertRule)):
-        rules[rule.org_id].append(rule)
-    reference.rules_by_org = dict(rules)
-
-    metrics = await session.execute(
-        select(MetricDefinition.key, MetricDefinition.min_valid, MetricDefinition.max_valid)
-    )
-    reference.metric_limits = {key: (low, high) for key, low, high in metrics}
-    reference.settings = await load_settings(session)
-    return reference
 
 
 class IngestService:

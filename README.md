@@ -19,7 +19,6 @@ Devices -> Mosquitto -> Ingest worker -> PostgreSQL <- Jobs worker
 
 ```bash
 cp backend/.env.example backend/.env         # then replace every change-me value
-cp frontend/.env.example frontend/.env.local
 docker compose up --build
 docker compose exec api python -m app.scripts.seed_demo --password <choose-one>
 docker compose exec api python -m app.scripts.simulator --password <MQTT_SIMULATOR_PASSWORD>
@@ -27,26 +26,13 @@ docker compose exec api python -m app.scripts.simulator --password <MQTT_SIMULAT
 
 Log in at `http://localhost:8000/docs` as `owner@example.com`.
 
-## Run the frontend
-
-```bash
-cd frontend
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-Open `http://localhost:3000`. The screens need the API running, with
-`http://localhost:3000` listed in `CORS_ORIGINS`.
-
 ## Environment files
 
 | File | Used by | Contains |
 |---|---|---|
 | `backend/.env` | API, workers, PostgreSQL, Mosquitto | Secrets and server settings |
-| `frontend/.env.local` | Next.js app | Public settings only, such as the API address |
 
-Neither file is committed to git.
+This file is not committed to git.
 
 ## Run tests
 

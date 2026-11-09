@@ -33,6 +33,9 @@ class BaseRepository(Generic[ModelT]):
         self.session.add(entity)
         return entity
 
+    async def delete(self, entity: ModelT) -> None:
+        await self.session.delete(entity)
+
 
 class TenantRepository(BaseRepository[ModelT]):
     """Every query is limited to one organization.

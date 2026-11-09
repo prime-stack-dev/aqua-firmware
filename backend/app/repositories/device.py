@@ -4,9 +4,25 @@ from datetime import datetime
 
 from sqlalchemy import and_, select
 
-from app.models import Device, DeviceLatest
-from app.repositories.base import TenantRepository
+from app.models import Device, DeviceLatest, Pond
+from app.repositories.base import BaseRepository, TenantRepository
 from app.repositories.subscription import accessible_device_ids
+
+
+class DeviceLookupRepository(BaseRepository[Device]):
+    """System-level device lookups across all organizations (for workers)."""
+
+    model = Device
+
+    async def list_active_devices(
+        self,
+    ) -> Sequence[tuple[str, uuid.UUID, uuid.UUID, uuid.UUID | None, uuid.UUID | None]]:
+        stmt = (
+            select(Device.serial, Device.id, Device.org_id, Device.pond_id, Pond.farm_id)
+            .outerjoin(Pond, Pond.id == Device.pond_id)
+            .where(Device.org_id.is_not(None), Device.is_active)
+        )
+        return (await self.session.execute(stmt)).all()
 
 
 class DeviceRepository(TenantRepository[Device]):
