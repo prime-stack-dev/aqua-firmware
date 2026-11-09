@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timedelta
 
-from sqlalchemy import and_, select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Alert, Device, DeviceLatest
@@ -30,11 +30,11 @@ async def detect_offline_devices(session: AsyncSession, now: datetime, minutes: 
     )
     silent = await session.execute(
         select(Device.id, Device.org_id, Device.pond_id)
-        .join(DeviceLatest, DeviceLatest.device_id == Device.id)
+        .outerjoin(DeviceLatest, DeviceLatest.device_id == Device.id)
         .where(
             Device.org_id.is_not(None),
             Device.is_active,
-            DeviceLatest.ts < cutoff,
+            or_(DeviceLatest.ts.is_(None), DeviceLatest.ts < cutoff),
             ~select(Alert.id).where(live).exists(),
         )
     )

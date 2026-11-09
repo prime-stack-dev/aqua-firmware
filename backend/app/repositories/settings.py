@@ -23,8 +23,14 @@ class SettingsRepository(BaseRepository[SystemSetting]):
         result = {}
         for key, default in DEFAULTS.items():
             value = stored.get(key, default)
-            valid = isinstance(value, int) and not isinstance(value, bool) and value > 0
-            result[key] = value if valid else default
+            try:
+                if isinstance(value, bool):
+                    result[key] = default
+                else:
+                    val = int(value)
+                    result[key] = val if val > 0 else default
+            except (ValueError, TypeError):
+                result[key] = default
         return result
 
 

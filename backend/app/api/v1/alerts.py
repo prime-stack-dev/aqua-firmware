@@ -89,7 +89,11 @@ async def update_rule(
         raise not_found("Alert rule")
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(rule, field, value)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise AppError(409, "A rule for this scope and severity already exists") from exc
     return rule
 
 

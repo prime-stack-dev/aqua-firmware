@@ -34,14 +34,21 @@ def _reading_columns() -> list[sa.Column]:
     ]
 
 
-def _monthly_partitions(months: int) -> list[str]:
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    total = year * 12 + (month - 1) + delta
+    return total // 12, (total % 12) + 1
+
+
+def _monthly_partitions(past_months: int = 6, future_months: int = 6) -> list[str]:
     today = datetime.now(UTC)
-    year, month = today.year, today.month
+    start_year, start_month = _shift_month(today.year, today.month, -past_months)
+    total_months = past_months + 1 + future_months
     statements = []
-    for _ in range(months):
-        next_year, next_month = (year + 1, 1) if month == 12 else (year, month + 1)
+    year, month = start_year, start_month
+    for _ in range(total_months):
+        next_year, next_month = _shift_month(year, month, 1)
         statements.append(
-            f"CREATE TABLE telemetry_y{year}m{month:02d} PARTITION OF telemetry "
+            f"CREATE TABLE IF NOT EXISTS telemetry_y{year}m{month:02d} PARTITION OF telemetry "
             f"FOR VALUES FROM ('{year}-{month:02d}-01+00') "
             f"TO ('{next_year}-{next_month:02d}-01+00')"
         )
@@ -208,9 +215,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("device_id", "ts", name="pk_telemetry"),
         postgresql_partition_by="RANGE (ts)",
     )
-    # Catches any timestamp outside the monthly partitions so no reading fails.
-    op.execute("CREATE TABLE telemetry_default PARTITION OF telemetry DEFAULT")
-    for statement in _monthly_partitions(months=4):
+    for statement in _monthly_partitions(past_months=6, future_months=6):
         op.execute(statement)
 
     op.create_table(
@@ -354,9 +359,9 @@ def upgrade() -> None:
     )
     op.execute(
         "INSERT INTO system_settings (key, value) VALUES "
-        "('offline_timeout_minutes', '5'), "
-        "('ingest_batch_size', '500'), "
-        "('ingest_flush_seconds', '1')"
+        "('offline_timeout_minutes', 5), "
+        "('ingest_batch_size', 500), "
+        "('ingest_flush_seconds', 1)"
     )
 
 
