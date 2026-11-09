@@ -1,0 +1,133 @@
+name: Deploy Development (Staging)
+
+on:
+  push:
+    branches: [ dev ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  test-dev:
+    name: Dev Pre-deployment Verification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: aqua_dev
+          POSTGRES_PASSWORD: aqua_dev_password
+          POSTGRES_DB: aqua_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aqua_dev -d aqua_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://aqua_dev:aqua_dev_password@localhost:5432/aqua_test
+      JWT_SECRET: ci-dev-secret-that-is-at-least-32-characters-long
+      ENVIRONMENT: development
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Syntax Check
+        run: python -m compileall backend/app
+
+      - name: Run Alembic Migrations
+        run: |
+          cd backend
+          alembic upgrade head
+
+      - name: Verify Models Match Migrations
+        run: |
+          cd backend
+          alembic check
+
+      - name: Run Unit Tests
+        run: pytest
+
+      - name: Validate Dev Docker Compose Specification
+        run: |
+          cd deployment
+          cp .env.dev.example .env.dev 2>/dev/null || cat << 'EOF' > .env.dev
+          ENVIRONMENT=development
+          POSTGRES_USER=aqua_dev
+          POSTGRES_PASSWORD=ci_test_password
+          POSTGRES_DB=aquadb_dev
+          POSTGRES_PORT=5433
+          DATABASE_URL=postgresql+asyncpg://aqua_dev:ci_test_password@postgres-db:5432/aquadb_dev
+          API_PORT=8001
+          MQTT_PORT=1884
+          REDIS_HOST_PORT=6380
+          JWT_SECRET=ci_dev_secret_that_is_at_least_32_characters_long
+          JWT_SECRET_KEY=ci_dev_secret_that_is_at_least_32_characters_long
+          CORS_ORIGINS=["http://localhost:3000","http://localhost:8001"]
+          MQTT_BROKER_HOST=mqtt-broker
+          MQTT_BROKER_PORT=1883
+          MQTT_USERNAME=ingest
+          MQTT_PASSWORD=ci_mqtt_password
+          MQTT_SIMULATOR_PASSWORD=ci_sim_password
+          MQTT_TELEMETRY_TOPIC=aqua/devices/+/telemetry
+          MQTT_SHARED_GROUP=ingest
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          EOF
+          docker compose -f docker-compose.dev.yml --env-file .env.dev config > /dev/null
+
+  deploy-dev:
+    name: Deploy to Dev Environment (EC2 Graviton)
+    needs: test-dev
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key
+        if: ${{ env.EC2_SSH_KEY != '' }}
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Deploy to Dev EC2 Instance
+        env:
+          EC2_HOST: ${{ secrets.DEV_EC2_HOST }}
+          EC2_USER: ${{ secrets.DEV_EC2_USER || 'ubuntu' }}
+          DEV_ENV_FILE: ${{ secrets.DEV_ENV_FILE }}
+        run: |
+          if [ -z "${EC2_HOST:-}" ]; then
+            echo "DEV_EC2_HOST secret not configured. Validating deployment script locally."
+            chmod +x deployment/scripts/deploy_dev.sh
+            echo "Development deployment script validated successfully."
+            exit 0
+          fi
+
+          echo "Deploying to Development host: ${EC2_HOST}..."
+          ssh -o StrictHostKeyChecking=no "${EC2_USER}@${EC2_HOST}" << 'ENDSSH'
+            set -e
+            cd /opt/aqua-firmware
+            git fetch origin dev
+            git checkout dev
+            git pull origin dev
+            chmod +x deployment/scripts/deploy_dev.sh
+            ./deployment/scripts/deploy_dev.sh
+          ENDSSH

@@ -1,0 +1,95 @@
+# ==============================================================================
+# Aqua OS Platform: Nginx Configuration for Dedicated Domain (Let's Encrypt SSL)
+# Rename or copy to aqua.conf when a custom domain is acquired.
+# Target: api.YOUR_DOMAIN.com (Production) and api-dev.YOUR_DOMAIN.com (Development)
+# ==============================================================================
+
+upstream aqua_prod_backend {
+    server 127.0.0.1:8000;
+    keepalive 32;
+}
+
+upstream aqua_dev_backend {
+    server 127.0.0.1:8001;
+    keepalive 16;
+}
+
+# --- HTTP to HTTPS Redirect ---
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.YOUR_DOMAIN.com api-dev.YOUR_DOMAIN.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- Production API (https://api.YOUR_DOMAIN.com) ---
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.YOUR_DOMAIN.com;
+
+    ssl_certificate /etc/letsencrypt/live/api.YOUR_DOMAIN.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.YOUR_DOMAIN.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 25M;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    location / {
+        proxy_pass http://aqua_prod_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+}
+
+# --- Development API (https://api-dev.YOUR_DOMAIN.com) ---
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api-dev.YOUR_DOMAIN.com;
+
+    ssl_certificate /etc/letsencrypt/live/api.YOUR_DOMAIN.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.YOUR_DOMAIN.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 25M;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location / {
+        proxy_pass http://aqua_dev_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_connect_timeout 10s;
+    }
+}

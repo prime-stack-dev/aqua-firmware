@@ -57,6 +57,18 @@ def _monthly_partitions(past_months: int = 6, future_months: int = 6) -> list[st
 
 
 def upgrade() -> None:
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+        EXCEPTION
+            WHEN OTHERS THEN
+                RAISE NOTICE 'TimescaleDB extension not available or skipped.';
+        END
+        $$;
+        """
+    )
     op.create_table(
         "organizations",
         sa.Column("name", sa.String(200), nullable=False),
