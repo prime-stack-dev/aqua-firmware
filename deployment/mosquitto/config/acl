@@ -1,7 +1,9 @@
-# The ingest worker reads all device telemetry.
+# The ingest worker reads all device telemetry and can perform healthchecks.
 user ingest
 topic read aqua/devices/+/telemetry
 topic read $share/ingest/aqua/devices/+/telemetry
+topic read $SYS/#
+topic readwrite aqua/healthcheck
 
 # Development simulator only. Publishes as any device.
 user simulator

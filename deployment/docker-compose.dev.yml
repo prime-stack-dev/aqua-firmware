@@ -33,9 +33,9 @@ services:
       - mosquitto_data_dev:/mosquitto/data
       - mosquitto_log_dev:/mosquitto/log
     healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -u ingest -P \"$$MQTT_PASSWORD\" || exit 1"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD-SHELL", "mosquitto_pub -t 'aqua/healthcheck' -m 'ping' -u ingest -P \"$$MQTT_PASSWORD\" -q 1 || exit 1"]
+      interval: 5s
+      timeout: 3s
       retries: 5
       start_period: 5s
     restart: always

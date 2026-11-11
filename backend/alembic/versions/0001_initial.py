@@ -371,9 +371,9 @@ def upgrade() -> None:
     )
     op.execute(
         "INSERT INTO system_settings (key, value) VALUES "
-        "('offline_timeout_minutes', 5), "
-        "('ingest_batch_size', 500), "
-        "('ingest_flush_seconds', 1)"
+        "('offline_timeout_minutes', '5'::jsonb), "
+        "('ingest_batch_size', '500'::jsonb), "
+        "('ingest_flush_seconds', '1'::jsonb)"
     )
 
 

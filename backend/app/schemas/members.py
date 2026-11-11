@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import Role
 
@@ -18,7 +18,7 @@ class MemberOut(BaseModel):
 
 
 class MemberInviteRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(max_length=254)
     full_name: str = Field(min_length=1, max_length=200)
     role: Role
     password: str | None = Field(default=None, min_length=8, max_length=256)
