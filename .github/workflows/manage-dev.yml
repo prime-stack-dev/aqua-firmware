@@ -1,0 +1,103 @@
+name: Manage Staging/Dev Environment (On-Demand Lifecycle)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Lifecycle Action to execute on Dev'
+        required: true
+        default: 'status'
+        type: choice
+        options:
+          - status
+          - start
+          - stop
+          - restart
+
+concurrency:
+  group: manage-dev
+  cancel-in-progress: false
+
+jobs:
+  manage-dev-lifecycle:
+    name: ${{ github.event.inputs.action }} Dev Environment
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key
+        if: ${{ env.EC2_SSH_KEY != '' }}
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$EC2_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+      - name: Execute Lifecycle Command on EC2 Host
+        env:
+          EC2_HOST: ${{ secrets.DEV_EC2_HOST || secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.DEV_EC2_USER || 'ubuntu' }}
+          ACTION: ${{ github.event.inputs.action }}
+        run: |
+          if [ -z "${EC2_HOST:-}" ]; then
+            echo "[-] DEV_EC2_HOST secret not configured."
+            echo "    Local simulation for action '${ACTION}':"
+            case "${ACTION}" in
+              start)
+                echo "--> Would execute: ./deployment/scripts/start_dev.sh"
+                ;;
+              stop)
+                echo "--> Would execute: ./deployment/scripts/stop_dev.sh"
+                ;;
+              restart)
+                echo "--> Would execute: ./deployment/scripts/stop_dev.sh && ./deployment/scripts/start_dev.sh"
+                ;;
+              status)
+                echo "--> Would execute: docker compose -p aqua-dev -f docker-compose.dev.yml ps"
+                ;;
+            esac
+            exit 0
+          fi
+
+          echo "Connecting to EC2 host ${EC2_HOST} to execute action '${ACTION}'..."
+          ssh -o StrictHostKeyChecking=no "${EC2_USER}@${EC2_HOST}" ACTION="${ACTION}" 'bash -s' << 'ENDSSH'
+            set -euo pipefail
+            cd /opt/aqua-firmware
+
+            chmod +x deployment/scripts/*.sh
+
+            case "${ACTION}" in
+              start)
+                echo "==> Waking up Staging/Dev environment..."
+                ./deployment/scripts/start_dev.sh
+                ;;
+              stop)
+                echo "==> Hibernating Staging/Dev environment..."
+                ./deployment/scripts/stop_dev.sh
+                ;;
+              restart)
+                echo "==> Restarting Staging/Dev environment..."
+                ./deployment/scripts/stop_dev.sh || true
+                ./deployment/scripts/start_dev.sh
+                ;;
+              status)
+                echo "==> Checking Staging/Dev container status..."
+                docker compose -p aqua-dev -f deployment/docker-compose.dev.yml ps
+                echo ""
+                echo "==> Active Resource Utilization:"
+                DEV_CONTAINERS="$(docker compose -p aqua-dev -f deployment/docker-compose.dev.yml ps -q 2>/dev/null || true)"
+                if [ -n "${DEV_CONTAINERS}" ]; then
+                  docker stats --no-stream ${DEV_CONTAINERS} 2>/dev/null || echo "Containers are stopped."
+                else
+                  echo "Dev is currently hibernated (0% CPU, 0 MB RAM)."
+                fi
+                ;;
+              *)
+                echo "Unknown action: ${ACTION}" >&2
+                exit 1
+                ;;
+            esac
+          ENDSSH

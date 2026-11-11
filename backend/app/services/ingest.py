@@ -19,6 +19,7 @@ from app.repositories.telemetry import TelemetryRepository
 from app.schemas.telemetry import TelemetryPayload
 from app.services.alerts import AlertService
 from app.services.domain import DeviceRef, Reading, ReferenceData
+from app.services.pond_status import PondStatusService
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,12 @@ class IngestService:
                     [newest[device_id].as_row() for device_id in sorted(newest)]
                 )
                 await AlertService(session).process(new, self.reference, now)
+                pond_ids = {r.device.pond_id for r in new if r.device.pond_id}
+                if pond_ids:
+                    recompute_time = max(r.ts for r in new)
+                    await PondStatusService(session).recompute(
+                        recompute_time, self.reference.settings.get("offline_timeout_minutes", 5), pond_ids
+                    )
             await session.commit()
         self.stats["saved"] += len(ordered)
 
