@@ -1,0 +1,120 @@
+# ==============================================================================
+# GitHub Actions Workflow: Pull Request Direction & Branch Strategy Validator
+# Aqua OS Platform: Prevents Accidental Code Contamination and Unverified Merges
+# ==============================================================================
+name: Validate Pull Request Direction
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - dev
+      - main
+
+concurrency:
+  group: pr-direction-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate-pr-direction:
+    name: Validate PR Direction
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Inspect and Enforce PR Branch Direction
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          echo "=========================================================="
+          echo " Validating Pull Request Direction & Branch Strategy     "
+          echo " Repository: aqua-firmware                                "
+          echo " PR #${PR_NUMBER}: ${PR_TITLE}                           "
+          echo " Source Branch (head_ref): ${HEAD_REF}                    "
+          echo " Target Branch (base_ref): ${BASE_REF}                    "
+          echo "=========================================================="
+
+          VIOLATION=""
+          REASON=""
+
+          # ------------------------------------------------------------------
+          # Rule A: Prevent merging 'main' (Production) into 'dev' (Staging)
+          # ------------------------------------------------------------------
+          if [ "${BASE_REF}" = "dev" ] && [ "${HEAD_REF}" = "main" ]; then
+            VIOLATION="Illegal Production to Development Merge (main -> dev)"
+            REASON="Pull Request targets 'dev' with source branch 'main'. Merging Production directly back into Development via PR is prohibited. All updates must originate in 'dev' or hotfix branches and be promoted forward to 'main' through verified releases."
+          fi
+
+          # ------------------------------------------------------------------
+          # Rule B: Ensure feature/bugfix branches merge into 'dev' first
+          # Target 'main' (Production) strictly accepts 'dev' or 'hotfix/*'
+          # ------------------------------------------------------------------
+          if [ "${BASE_REF}" = "main" ]; then
+            if [ "${HEAD_REF}" != "dev" ] && [[ ! "${HEAD_REF}" =~ ^hotfix[/_-] ]]; then
+              VIOLATION="Bypassed Development & Staging Verification (${HEAD_REF} -> main)"
+              REASON="Pull Request targets 'main' directly from '${HEAD_REF}'. Direct feature/bugfix merges into Production are strictly prohibited to prevent regressions and resource clashes in our single AWS micro account. Features and fixes must merge into 'dev' first for staging validation. Once verified on 'dev', create a release PR from 'dev' into 'main'."
+            fi
+          fi
+
+          # ------------------------------------------------------------------
+          # Evaluate Outcome and Output Results
+          # ------------------------------------------------------------------
+          if [ -n "${VIOLATION}" ]; then
+            echo "::error title=${VIOLATION}::${REASON}"
+            echo ""
+            echo "[-] VALIDATION FAILED: ${VIOLATION}"
+            echo "    Details: ${REASON}"
+            echo ""
+
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              cat << EOF >> "${GITHUB_STEP_SUMMARY}"
+          ## ❌ Pull Request Direction Check Failed
+
+          | Parameter | Value |
+          |---|---|
+          | **Pull Request** | #${PR_NUMBER} - ${PR_TITLE} |
+          | **Source Branch (\`head_ref\`)** | \`${HEAD_REF}\` |
+          | **Target Branch (\`base_ref\`)** | \`${BASE_REF}\` |
+          | **Violation** | **${VIOLATION}** |
+
+          ### ⚠️ Why Did This PR Fail?
+          ${REASON}
+
+          ### 🔄 Required Git Branching Flow
+          \`\`\`text
+          [Feature / Bugfix Branch]
+                     │
+                     ▼ (PR into dev)
+              [ 'dev' Branch ] (Staging Environment & CI Verification)
+                     │
+                     ▼ (Release PR from dev to main)
+             [ 'main' Branch ] (Production Deployment)
+          \`\`\`
+          > **Action Required:** Please edit the PR base branch to target \`dev\`, or close this PR.
+          EOF
+            fi
+            exit 1
+          else
+            echo "::notice title=PR Direction Approved::PR direction '${HEAD_REF}' -> '${BASE_REF}' complies with repository branch policy."
+            echo "[+] SUCCESS: Pull Request direction verified."
+            echo "    '${HEAD_REF}' -> '${BASE_REF}' complies with Aqua OS branch governance."
+
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              cat << EOF >> "${GITHUB_STEP_SUMMARY}"
+          ## ✅ Pull Request Direction Approved
+
+          | Parameter | Value |
+          |---|---|
+          | **Pull Request** | #${PR_NUMBER} - ${PR_TITLE} |
+          | **Source Branch (\`head_ref\`)** | \`${HEAD_REF}\` |
+          | **Target Branch (\`base_ref\`)** | \`${BASE_REF}\` |
+          | **Status** | **Approved** |
+
+          The PR branch direction complies with the **Aqua OS Branch Governance & Environment Isolation Standard**.
+          EOF
+            fi
+          fi
