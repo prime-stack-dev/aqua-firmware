@@ -26,6 +26,37 @@ class UserRepository(BaseRepository[User]):
         )
         return (await self.session.execute(stmt)).tuples().all()
 
+    async def org_members(self, org_id: uuid.UUID) -> Sequence[tuple[Membership, User]]:
+        stmt = (
+            select(Membership, User)
+            .join(User, User.id == Membership.user_id)
+            .where(Membership.org_id == org_id)
+            .order_by(User.full_name)
+        )
+        return (await self.session.execute(stmt)).tuples().all()
+
+    async def count_owners(self, org_id: uuid.UUID) -> int:
+        from sqlalchemy import func
+        from app.models.enums import Role
+
+        stmt = (
+            select(func.count())
+            .select_from(Membership)
+            .where(Membership.org_id == org_id, Membership.role == Role.OWNER.value)
+        )
+        return (await self.session.scalar(stmt)) or 0
+
+    def add_user(self, user: User) -> User:
+        self.session.add(user)
+        return user
+
+    def add_membership(self, membership: Membership) -> Membership:
+        self.session.add(membership)
+        return membership
+
+    async def remove_membership(self, membership: Membership) -> None:
+        await self.session.delete(membership)
+
 
 class RefreshTokenRepository(BaseRepository[RefreshToken]):
     model = RefreshToken

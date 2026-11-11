@@ -80,6 +80,22 @@ def require_roles(*roles: Role) -> Callable:
     return check
 
 
+OwnerOnly = Depends(require_roles(Role.OWNER))
+CanOperate = Annotated[Member, Depends(require_roles(Role.OWNER, Role.MANAGER))]
+AnyMember = Annotated[Member, Depends(require_roles(Role.OWNER, Role.MANAGER, Role.VIEWER))]
+
+
+async def require_platform_admin(
+    identity: Annotated[Identity, Depends(get_identity)],
+) -> Identity:
+    if not identity.user.is_platform_admin:
+        raise forbidden("Platform admin access required")
+    return identity
+
+
+PlatformAdminDep = Annotated[Identity, Depends(require_platform_admin)]
+
+
 def tenant_repo(repository: type[TenantRepository]):
     """Build a repository limited to the caller's organization."""
 

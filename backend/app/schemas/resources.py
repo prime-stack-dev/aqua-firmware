@@ -87,6 +87,7 @@ class AlertOut(BaseModel):
     last_value: float | None
     opened_at: datetime
     acknowledged_at: datetime | None
+    acknowledged_by: uuid.UUID | None = None
     closed_at: datetime | None
 
 
